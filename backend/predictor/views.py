@@ -18,7 +18,7 @@ from .models import Prediction
 def load_model():
 
     conn = mysql.connector.connect(
-        host="localhost",
+        host="db",
         user="root",
         password="",
         database="student_data"
