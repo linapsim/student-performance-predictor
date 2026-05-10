@@ -5,10 +5,9 @@ from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 
 from rest_framework.decorators import api_view
+from rest_framework.decorators import permission_classes
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-
-from django.contrib.auth.models import User
-from rest_framework.decorators import api_view
 
 from django.contrib.auth.models import User
 
@@ -19,8 +18,9 @@ def load_model():
 
     conn = mysql.connector.connect(
         host="db",
+        port=3306,
         user="root",
-        password="",
+        password="root",
         database="student_data"
     )
 
@@ -66,17 +66,42 @@ def load_model():
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def predict(request):
 
     try:
 
         model = load_model()
 
-        hours = float(request.data['hours'])
-        scores = float(request.data['scores'])
-        activities = int(request.data['activities'])
-        sleep = float(request.data['sleep'])
-        papers = float(request.data['papers'])
+        hours = float(request.data.get('hours', 0))
+        scores = float(request.data.get('scores', 0))
+        activities = int(request.data.get('activities', 0))
+        sleep = float(request.data.get('sleep', 0))
+        papers = float(request.data.get('papers', 0))
+
+        if hours < 0:
+
+            return Response({
+                "error": "Hours cannot be negative"
+            }, status=400)
+
+        if scores < 0 or scores > 100:
+
+            return Response({
+                "error": "Scores must be between 0 and 100"
+            }, status=400)
+
+        if sleep < 0 or sleep > 24:
+
+            return Response({
+                "error": "Sleep hours must be between 0 and 24"
+            }, status=400)
+
+        if papers < 0:
+
+            return Response({
+                "error": "Practice papers cannot be negative"
+            }, status=400)
 
         new_data = pd.DataFrame([[
             hours,
@@ -94,41 +119,43 @@ def predict(request):
 
         prediction = model.predict(new_data)[0]
 
-
         result = "PASS" if prediction == 1 else "FAIL"
 
         Prediction.objects.create(
-            user_id=1,
+            user=request.user,
             hours=hours,
             scores=scores,
             activities=activities,
             sleep=sleep,
             papers=papers,
             result=result
-)
+        )
 
         return Response({
-            "prediction": result,
+            "prediction": result
         })
 
     except Exception as e:
 
+        print("========== ERROR ==========")
         print(e)
+        print("===========================")
 
         return Response({
             "error": str(e)
         }, status=400)
-    
-
-
 
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def get_predictions(request):
 
-    predictions = Prediction.objects.all().values()
+    predictions = Prediction.objects.filter(
+        user=request.user
+    ).order_by('-id').values()
 
     return Response(predictions)
+
 
 @api_view(['POST'])
 def register(request):
@@ -142,22 +169,35 @@ def register(request):
             'error': 'Username already exists'
         }, status=400)
 
-    user = User.objects.create_user(
+    User.objects.create_user(
         username=username,
         password=password
     )
 
     return Response({
         'message': 'User created successfully'
-    })   
+    })
+
 
 @api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
 def delete_prediction(request, id):
 
-    prediction = Prediction.objects.get(id=id)
+    try:
 
-    prediction.delete()
+        prediction = Prediction.objects.get(
+            id=id,
+            user=request.user
+        )
 
-    return Response({
-        "message": "Prediction deleted"
-    })
+        prediction.delete()
+
+        return Response({
+            "message": "Prediction deleted"
+        })
+
+    except Prediction.DoesNotExist:
+
+        return Response({
+            "error": "Prediction not found"
+        }, status=404)
